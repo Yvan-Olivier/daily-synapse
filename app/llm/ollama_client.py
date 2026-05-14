@@ -10,11 +10,8 @@ import logging
 import os
 from typing import Optional
 
-from dotenv import load_dotenv
 from ollama import Client
 from pydantic import BaseModel
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +22,7 @@ class SummaryOutput(BaseModel):
     summary: str
 
 
-SUMMARIZE_SYSTEM_PROMPT = """You are an expert AI news summarizer.
+SUMMARIZE_SYSTEM_PROMPT = """You are an expert tech and AI news summarizer.
 
 Given an article from Anthropic (an AI safety / research company), produce:
 - A short, punchy title (5 to 10 words) capturing the essence
@@ -66,9 +63,10 @@ class OllamaClient:
                 ],
                 format=SummaryOutput.model_json_schema(),
                 options={"temperature": 0.3},
+                think=False,
             )
             return SummaryOutput.model_validate_json(
-                response["message"]["content"]
+                response.message.content
             )
         except Exception as exc:
             logger.error(

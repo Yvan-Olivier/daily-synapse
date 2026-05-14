@@ -354,4 +354,4 @@ Une seconde exécution successive doit afficher `0 new` (idempotence).
 
 ---
 
-_Dernière mise à jour : Code M0 livré, en attente du premier run utilisateur._
+_Dernière mise à jour : M0 testé et validé — pipeline end-to-end fonctionnel (scrape → PostgreSQL → résumé Ollama). Prochaine étape : M1 (email HTML quotidien)._

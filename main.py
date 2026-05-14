@@ -9,6 +9,10 @@ Usage:
 """
 import sys
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from app.services.process_summaries import run_pipeline
 
 

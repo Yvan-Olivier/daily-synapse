@@ -20,7 +20,7 @@ class AnthropicArticle(BaseModel):
     independently and be tested in isolation.
     """
     title: str
-    description: str
+    description: Optional[str] = None
     url: str
     guid: str
     published_at: datetime
@@ -71,7 +71,7 @@ class AnthropicScraper:
                 articles.append(
                     AnthropicArticle(
                         title=entry.get("title", ""),
-                        description=entry.get("description", ""),
+                        description=entry.get("description") or None,
                         url=entry.get("link", ""),
                         guid=guid,
                         published_at=published_time,

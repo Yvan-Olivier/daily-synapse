@@ -12,10 +12,6 @@ The pipeline is idempotent: running it twice in a row produces
 import logging
 from datetime import datetime
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
 from app.config import DEFAULT_LOOKBACK_HOURS
 from app.database.repository import Repository
 from app.llm.ollama_client import OllamaClient

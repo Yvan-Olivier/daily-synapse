@@ -13,7 +13,7 @@ Instructions de mise en route du squelette M0.
 ## 1. Récupérer le modèle Ollama
 
 ```bash
-ollama pull qwen2.5:7b
+ollama pull qwen3.5:9b
 ```
 
 Vérifier que le modèle est disponible :
@@ -25,7 +25,7 @@ ollama list
 Tester rapidement :
 
 ```bash
-ollama run qwen2.5:7b "Reply with only: OK"
+ollama run qwen3.5:9b "Reply with only: OK"
 ```
 
 ## 2. Configurer l'environnement
@@ -114,12 +114,6 @@ Le scraper :
 uv run python -m app.scrapers.anthropic
 ```
 
-Le client Ollama :
-
-```bash
-uv run python -m app.llm.ollama_client
-```
-
 ## Arrêter Postgres
 
 ```bash
@@ -179,4 +173,4 @@ ollama serve  # dans un autre terminal, si pas lancé en daemon
 
 **`uv: command not found`** → relancer le shell après installation ou ajouter `~/.local/bin` au `PATH`.
 
-**Pipeline lent au premier appel** → normal, Qwen 2.5 7B charge ~5 GB en RAM/VRAM au premier appel. Les appels suivants sont rapides.
+**Pipeline lent au premier appel** → normal, Qwen 3.5 9B charge ~7 GB en RAM/VRAM au premier appel. Les appels suivants sont rapides.

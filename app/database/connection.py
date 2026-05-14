@@ -4,11 +4,8 @@ Reads Postgres connection details from environment variables (.env).
 """
 import os
 
-from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
-load_dotenv()
 
 
 def get_database_url() -> str:
