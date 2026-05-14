@@ -1,19 +1,20 @@
-"""End-to-end M0 pipeline orchestrator.
+"""End-to-end pipeline orchestrator (M0 → M1).
 
 Pipeline:
     1. Scrape Anthropic RSS feeds
     2. Insert new articles into Postgres (skip duplicates)
     3. Summarize every article that doesn't yet have a summary via Ollama
-    4. Store the generated summary back into Postgres
+    4. Send the daily digest email via Resend, mark articles as emailed
 
 The pipeline is idempotent: running it twice in a row produces
-0 inserts and 0 summaries on the second run.
+0 inserts, 0 summaries, and 0 emails on the second run.
 """
 import logging
 from datetime import datetime
 
 from app.config import DEFAULT_LOOKBACK_HOURS
 from app.database.repository import Repository
+from app.email.sender import send_digest
 from app.llm.ollama_client import OllamaClient
 from app.scrapers.anthropic import AnthropicScraper
 
@@ -33,7 +34,7 @@ def run_pipeline(hours: int = DEFAULT_LOOKBACK_HOURS) -> dict:
     """
     start = datetime.now()
     logger.info("=" * 60)
-    logger.info("Daily Synapse — M0 pipeline starting")
+    logger.info("Daily Synapse — pipeline starting")
     logger.info("=" * 60)
 
     result = {
@@ -43,6 +44,8 @@ def run_pipeline(hours: int = DEFAULT_LOOKBACK_HOURS) -> dict:
         "existing": 0,
         "summarized": 0,
         "failed": 0,
+        "emailed": 0,
+        "email_success": False,
         "success": False,
     }
 
@@ -54,13 +57,13 @@ def run_pipeline(hours: int = DEFAULT_LOOKBACK_HOURS) -> dict:
         llm = OllamaClient()
 
         # 1. Scrape ----------------------------------------------------------
-        logger.info("[1/3] Scraping Anthropic RSS (last %sh)...", hours)
+        logger.info("[1/4] Scraping Anthropic RSS (last %sh)...", hours)
         articles = scraper.get_articles(hours=hours)
         result["scraped"] = len(articles)
         logger.info("      Found %d articles in feeds", len(articles))
 
         # 2. Persist new articles -------------------------------------------
-        logger.info("[2/3] Storing new articles in Postgres...")
+        logger.info("[2/4] Storing new articles in Postgres...")
         article_dicts = [a.model_dump() for a in articles]
         inserted = repo.bulk_insert_anthropic_articles(article_dicts)
         result["inserted"] = inserted
@@ -72,7 +75,7 @@ def run_pipeline(hours: int = DEFAULT_LOOKBACK_HOURS) -> dict:
         )
 
         # 3. Summarize pending articles -------------------------------------
-        logger.info("[3/3] Summarizing pending articles via Ollama...")
+        logger.info("[3/4] Summarizing pending articles via Ollama...")
         pending = repo.get_articles_without_summary()
         logger.info("      %d article(s) pending summarization", len(pending))
 
@@ -100,6 +103,15 @@ def run_pipeline(hours: int = DEFAULT_LOOKBACK_HOURS) -> dict:
             result["summarized"] += 1
             logger.info("            -> %s", summary_output.title)
 
+        # 4. Send digest email -------------------------------------------------
+        logger.info("[4/4] Sending digest email...")
+        digest_articles = repo.get_articles_for_digest()
+        result["emailed"] = len(digest_articles)
+        email_sent = send_digest(digest_articles)
+        result["email_success"] = email_sent
+        if email_sent and digest_articles:
+            repo.mark_articles_emailed([a.guid for a in digest_articles])
+
         result["success"] = True
 
     except Exception as exc:
@@ -125,6 +137,11 @@ def run_pipeline(hours: int = DEFAULT_LOOKBACK_HOURS) -> dict:
         "  Summarized: %d (failed: %d)",
         result["summarized"],
         result["failed"],
+    )
+    logger.info(
+        "  Emailed:    %d (sent: %s)",
+        result["emailed"],
+        result["email_success"],
     )
     logger.info("=" * 60)
 

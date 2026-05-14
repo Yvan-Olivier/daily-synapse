@@ -45,6 +45,7 @@ _Note : le détail des sources, canaux et agents sera fixé au Bloc 2._
 | Format du podcast | Monologue solo, 1 voix narratrice, 3-5 min |
 | Modèle multi-user | Latent (table users en DB, pas d'auth pour démarrer) |
 | Trigger d'exécution | Cron quotidien + déclenchement manuel via API REST |
+| Modèle multi-user | Latent — destinataire email fixe dans `.env` (M1) ; table `users` en DB introduite en M3/M6 quand le multi-utilisateur sera nécessaire |
 
 ---
 
@@ -122,6 +123,7 @@ Logique :
 |---|---|---|
 | **Vector DB** | Qdrant | DB vectorielle dédiée, Docker-ready, production-grade |
 | **Cloud** | Azure | 2 certifications Microsoft, Azure Container Apps + Blob Storage |
+| **Email** | Resend | SDK Python simple, 3 000 emails/mois gratuits, sandbox sans domaine pour M1 ; domaine custom à vérifier en M8 |
 | **TTS** | Azure AI Speech | Natif Azure, 0.5M chars/mois gratuits, architecture cohérente |
 | **Backend API** | FastAPI | Standard Python IA, OpenAPI auto-générée, Pydantic intégré |
 | **Base de données** | PostgreSQL (déjà dans le repo de base) | |
@@ -339,6 +341,30 @@ Une seconde exécution successive doit afficher `0 new` (idempotence).
 - **Docker Desktop** installé et lancé
 - **Ollama** installé localement (https://ollama.com) + un modèle pull
 - **uv** installé (https://docs.astral.sh/uv/)
+
+---
+
+## 🛠️ Mise en route locale
+
+**Prérequis** : Docker Desktop, Ollama (`ollama pull qwen3.5:9b`), uv.
+
+```bash
+cp .env.example .env          # renseigner RESEND_API_KEY + DIGEST_EMAIL
+uv sync                       # installer les dépendances
+docker compose up -d          # démarrer Postgres
+uv run python -m app.database.create_tables  # créer les tables (1 fois)
+uv run python main.py         # lancer le pipeline
+```
+
+Vérification en DB :
+```sql
+SELECT title, summary_title, emailed_at FROM anthropic_articles ORDER BY published_at DESC LIMIT 5;
+```
+
+**Dépannage** :
+- Postgres ne démarre pas → port 5432 déjà utilisé
+- Ollama connection refused → lancer `ollama serve`
+- Email non reçu → vérifier `RESEND_API_KEY` dans `.env` ; sandbox peut aller en spam
 
 ---
 

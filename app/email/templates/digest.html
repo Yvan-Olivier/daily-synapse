@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Daily Synapse · {{ date }}</title>
+  <style>
+    body { font-family: Georgia, serif; background: #f9f9f9; color: #1a1a1a; margin: 0; padding: 0; }
+    .wrapper { max-width: 620px; margin: 40px auto; background: #ffffff; border-radius: 8px; overflow: hidden; }
+    .header { background: #0f172a; padding: 28px 36px; }
+    .header h1 { margin: 0; font-size: 22px; color: #ffffff; letter-spacing: 0.5px; }
+    .header p { margin: 6px 0 0; font-size: 13px; color: #94a3b8; }
+    .body { padding: 28px 36px; }
+    .empty { color: #64748b; font-size: 15px; font-style: italic; }
+    .article { border-bottom: 1px solid #e2e8f0; padding: 20px 0; }
+    .article:last-child { border-bottom: none; }
+    .article h2 { margin: 0 0 6px; font-size: 17px; }
+    .article h2 a { color: #0f172a; text-decoration: none; }
+    .article h2 a:hover { text-decoration: underline; }
+    .article .meta { font-size: 12px; color: #94a3b8; margin-bottom: 10px; }
+    .article p { margin: 0; font-size: 15px; line-height: 1.6; color: #374151; }
+    .footer { background: #f1f5f9; padding: 16px 36px; text-align: center; font-size: 12px; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="header">
+      <h1>Daily Synapse</h1>
+      <p>{{ date }}{% if articles %} · {{ articles | length }} new article{{ 's' if articles | length > 1 else '' }}{% else %} · No new articles{% endif %}</p>
+    </div>
+    <div class="body">
+      {% if articles %}
+        {% for article in articles %}
+        <div class="article">
+          <h2><a href="{{ article.url }}">{{ article.summary_title or article.title }}</a></h2>
+          <div class="meta">{{ article.published_at.strftime('%B %d, %Y') }}{% if article.category %} · {{ article.category }}{% endif %}</div>
+          <p>{{ article.summary }}</p>
+        </div>
+        {% endfor %}
+      {% else %}
+        <p class="empty">The pipeline ran successfully — no new articles since the last digest.</p>
+      {% endif %}
+    </div>
+    <div class="footer">Daily Synapse · AI news, daily</div>
+  </div>
+</body>
+</html>
