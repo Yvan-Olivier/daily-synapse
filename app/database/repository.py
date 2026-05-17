@@ -3,13 +3,13 @@
 All DB reads/writes go through this module — no SQLAlchemy queries
 anywhere else in the codebase.
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
 from .connection import get_session
-from .models import AnthropicArticle
+from .models import AnthropicArticle, PodcastEpisode
 
 
 class Repository:
@@ -94,6 +94,65 @@ class Repository:
             if article:
                 article.emailed_at = now
         self.session.commit()
+
+    # --- Podcast episodes ----------------------------------------------------
+
+    def get_articles_for_podcast(self) -> List[AnthropicArticle]:
+        """Return summarized articles not yet included in a podcast episode."""
+        return (
+            self.session.query(AnthropicArticle)
+            .filter(
+                AnthropicArticle.summary.isnot(None),
+                AnthropicArticle.podcasted_at.is_(None),
+            )
+            .order_by(AnthropicArticle.published_at.desc())
+            .all()
+        )
+
+    def mark_articles_podcasted(self, guids: List[str]) -> None:
+        """Stamp podcasted_at on all articles included in the episode."""
+        now = datetime.now(timezone.utc)
+        for guid in guids:
+            article = self.session.query(AnthropicArticle).filter_by(guid=guid).first()
+            if article:
+                article.podcasted_at = now
+        self.session.commit()
+
+    def save_podcast_episode(
+        self, episode_date: date, script: str, article_guids: List[str]
+    ) -> PodcastEpisode:
+        """Persist a new episode with its script. mp3_path is set later via update_podcast_mp3."""
+        episode = PodcastEpisode(
+            episode_date=episode_date,
+            script=script,
+            mp3_path=None,
+            article_guids=article_guids,
+        )
+        self.session.add(episode)
+        self.session.commit()
+        return episode
+
+    def update_podcast_mp3(self, episode_date: date, mp3_path: str) -> bool:
+        """Set mp3_path once TTS succeeds."""
+        episode = (
+            self.session.query(PodcastEpisode)
+            .filter_by(episode_date=episode_date)
+            .first()
+        )
+        if not episode:
+            return False
+        episode.mp3_path = mp3_path
+        self.session.commit()
+        return True
+
+    def get_pending_tts_episode(self, episode_date: date) -> Optional[PodcastEpisode]:
+        """Return episode if script exists but mp3_path is still NULL (TTS retry)."""
+        return (
+            self.session.query(PodcastEpisode)
+            .filter_by(episode_date=episode_date)
+            .filter(PodcastEpisode.mp3_path.is_(None))
+            .first()
+        )
 
     # --- Lifecycle -----------------------------------------------------------
 

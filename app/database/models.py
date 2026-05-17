@@ -1,13 +1,13 @@
-"""SQLAlchemy ORM models — M0.
+"""SQLAlchemy ORM models — M0 → M2.
 
 For M0 we only model Anthropic articles. Adding more sources in later
 milestones will add new tables (one per source for now; refactored into
 a single generic `articles` table once the source registry is introduced).
 """
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import date, datetime, timezone
+from typing import List, Optional
 
-from sqlalchemy import DateTime, String, Text
+from sqlalchemy import ARRAY, Date, DateTime, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -34,7 +34,25 @@ class AnthropicArticle(Base):
     emailed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    podcasted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class PodcastEpisode(Base):
+    __tablename__ = "podcast_episodes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    episode_date: Mapped[date] = mapped_column(Date, unique=True, nullable=False)
+    script: Mapped[str] = mapped_column(Text, nullable=False)
+    mp3_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    article_guids: Mapped[List[str]] = mapped_column(ARRAY(String), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

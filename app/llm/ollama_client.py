@@ -7,11 +7,11 @@ In later milestones, this client will be replaced (or coexist) with
 Claude Haiku / Sonnet through a common interface.
 """
 import logging
-import os
 from typing import Optional
 
-from ollama import Client
 from pydantic import BaseModel
+
+from app.llm.base import OllamaBase
 
 logger = logging.getLogger(__name__)
 
@@ -32,15 +32,7 @@ Be concise, technical, and avoid marketing fluff.
 Output strictly valid JSON matching the requested schema."""
 
 
-class OllamaClient:
-    def __init__(
-        self,
-        model: Optional[str] = None,
-        host: Optional[str] = None,
-    ):
-        self.model = model or os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
-        self.host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        self.client = Client(host=self.host)
+class OllamaClient(OllamaBase):
 
     def summarize(self, title: str, content: str) -> Optional[SummaryOutput]:
         """Generate a structured summary for one article.

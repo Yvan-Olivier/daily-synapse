@@ -67,7 +67,7 @@ _Note : le détail des sources, canaux et agents sera fixé au Bloc 2._
 - [x] **Bloc 6** — DevOps & production (verrouillé)
 - [x] **Bloc 7** — Différenciation & CV (verrouillé)
 - [x] **Phase 3 — Roadmap** (verrouillée)
-- [ ] Phase 3 — Implémentation (à démarrer)
+- [x] Phase 3 — Implémentation M0 ✅ M1 ✅ M2 ✅ (M3 à venir)
 
 ---
 
@@ -124,7 +124,7 @@ Logique :
 | **Vector DB** | Qdrant | DB vectorielle dédiée, Docker-ready, production-grade |
 | **Cloud** | Azure | 2 certifications Microsoft, Azure Container Apps + Blob Storage |
 | **Email** | Resend | SDK Python simple, 3 000 emails/mois gratuits, sandbox sans domaine pour M1 ; domaine custom à vérifier en M8 |
-| **TTS** | Azure AI Speech | Natif Azure, 0.5M chars/mois gratuits, architecture cohérente |
+| **TTS** | OpenAI TTS (M2) → Azure AI Speech (M8) | OpenAI pour démarrer (Azure for Students région-bloqué) ; swap Azure en M8 via adaptateur `TTSClient` |
 | **Backend API** | FastAPI | Standard Python IA, OpenAPI auto-générée, Pydantic intégré |
 | **Base de données** | PostgreSQL (déjà dans le repo de base) | |
 
@@ -222,7 +222,7 @@ Construire d'abord un squelette qui marche de bout en bout avec les technos cibl
 |---|---|---|---|
 | **M0** | Squelette minimal | Scrape RSS (1-2 sources) → Postgres (Docker) → résumé LLM → print console | — |
 | **M1** | Mail HTML quotidien | Mail HTML reçu chaque jour avec top articles + résumés | partiel |
-| **M2** | Podcast TTS quotidien | MP3 généré chaque jour (Azure AI Speech), fichier local | partiel |
+| **M2** | Podcast TTS quotidien | MP3 généré chaque jour (OpenAI TTS → Azure en M8), fichier local ✅ | partiel |
 | **M3** | **Migration vers LangGraph** + Agent Critic | Pipeline multi-agents LangGraph avec Critic anti-hallucination | ✅ **CV-able ici** |
 | **M4** | Embeddings + Qdrant | Embeddings calculés (Ollama nomic-embed-text), stockés dans Qdrant | ✅ |
 | **M5** | Sources élargies | arXiv (filtrage embeddings) + YouTube creators + Newsletters | ✅ |
@@ -368,6 +368,93 @@ SELECT title, summary_title, emailed_at FROM anthropic_articles ORDER BY publish
 
 ---
 
+## 🎙️ Spécification M2 — Podcast TTS quotidien
+
+### Pipeline complet (M2)
+
+```
+Scrape → Store → Summarize → Email → Podcast
+```
+
+Le podcast est la 5e et dernière étape. Si elle échoue, le pipeline ne crashe pas — l'email a déjà été envoyé.
+
+### Déclenchement
+
+Même logique d'idempotence que l'email : le podcast est généré uniquement si des articles ont un résumé et `podcasted_at IS NULL`. Un seul épisode par jour.
+
+### Script
+
+| Paramètre | Valeur |
+|---|---|
+| LLM | Ollama local (`qwen3.5:9b`) |
+| Langue | Anglais |
+| Format | Monologue fluide (pas une liste lue) |
+| Structure | Intro avec date, corps libre, outro court |
+| Longueur cible | 400-600 mots (~3-4 min audio) |
+
+### TTS — OpenAI TTS (M2) → Azure AI Speech (M8)
+
+**M2 local** : OpenAI TTS (Azure for Students bloque les régions Speech Services).
+**M8 déploiement** : swap vers Azure AI Speech si la subscription le permet — `tts_client.py` est un adaptateur interchangeable.
+
+| Paramètre | Valeur |
+|---|---|
+| SDK M2 | `openai` Python SDK |
+| Modèle | `tts-1` |
+| Voix par défaut | `nova` |
+| Override | `PODCAST_VOICE` dans `.env` |
+| Coût estimé | ~$0.0014/mois (500 mots/épisode × 30 jours) |
+| Interface | Classe abstraite `TTSClient` — `AzureTTSClient` ajouté en M8 |
+
+### Stockage
+
+| Donnée | Où |
+|---|---|
+| Script texte | Table `podcast_episodes` en DB |
+| Chemin MP3 | Table `podcast_episodes` (`mp3_path`) |
+| Fichier MP3 | `output/podcasts/daily-synapse-YYYY-MM-DD.mp3` |
+| Flag article | `podcasted_at` sur `AnthropicArticle` |
+
+### Table `podcast_episodes`
+
+```
+id          SERIAL PRIMARY KEY
+episode_date DATE UNIQUE
+script      TEXT
+mp3_path    TEXT (NULL si TTS a échoué)
+article_guids TEXT[] (liste des articles inclus)
+created_at  TIMESTAMPTZ
+```
+
+### Résilience
+
+- Script généré → sauvegardé en DB même si TTS échoue (`mp3_path = NULL`)
+- Au prochain run : si script existe mais `mp3_path IS NULL` → retente uniquement le TTS
+- Pipeline continue sans crasher dans tous les cas
+
+### Variables `.env` ajoutées
+
+```
+OPENAI_API_KEY=          # utilisé pour TTS en M2
+PODCAST_VOICE=nova       # voix OpenAI TTS (nova, alloy, echo, fable, onyx, shimmer)
+```
+
+### Nouveaux fichiers
+
+```
+app/
+└── podcast/
+    ├── __init__.py
+    ├── tts_client.py     ← Azure AI Speech SDK
+    └── producer.py       ← orchestration script → TTS → MP3
+app/llm/
+└── script_writer.py      ← génération du script via Ollama
+output/
+└── podcasts/             ← MP3 locaux (gitignored)
+```
+
+---
+
 ## 🔮 Idées en réserve (post-MVP, non engagées)
 
 - Research Agent conversationnel (extension future explicitement gardée pour plus tard)
@@ -380,4 +467,4 @@ SELECT title, summary_title, emailed_at FROM anthropic_articles ORDER BY publish
 
 ---
 
-_Dernière mise à jour : M0 testé et validé — pipeline end-to-end fonctionnel (scrape → PostgreSQL → résumé Ollama). Prochaine étape : M1 (email HTML quotidien)._
+_Dernière mise à jour : M0 + M1 + M2 validés. Prochaine étape : M3 (LangGraph + agent Critic)._

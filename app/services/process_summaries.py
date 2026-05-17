@@ -1,13 +1,14 @@
-"""End-to-end pipeline orchestrator (M0 → M1).
+"""End-to-end pipeline orchestrator (M0 → M2).
 
 Pipeline:
     1. Scrape Anthropic RSS feeds
     2. Insert new articles into Postgres (skip duplicates)
     3. Summarize every article that doesn't yet have a summary via Ollama
     4. Send the daily digest email via Resend, mark articles as emailed
+    5. Produce the daily podcast episode (script via Ollama + MP3 via TTS)
 
 The pipeline is idempotent: running it twice in a row produces
-0 inserts, 0 summaries, and 0 emails on the second run.
+0 inserts, 0 summaries, 0 emails, and 0 new episodes on the second run.
 """
 import logging
 from datetime import datetime
@@ -16,6 +17,7 @@ from app.config import DEFAULT_LOOKBACK_HOURS
 from app.database.repository import Repository
 from app.email.sender import send_digest
 from app.llm.ollama_client import OllamaClient
+from app.podcast.producer import produce_episode
 from app.scrapers.anthropic import AnthropicScraper
 
 logging.basicConfig(
@@ -46,6 +48,8 @@ def run_pipeline(hours: int = DEFAULT_LOOKBACK_HOURS) -> dict:
         "failed": 0,
         "emailed": 0,
         "email_success": False,
+        "podcast_skipped": False,
+        "podcast_mp3": None,
         "success": False,
     }
 
@@ -112,6 +116,18 @@ def run_pipeline(hours: int = DEFAULT_LOOKBACK_HOURS) -> dict:
         if email_sent and digest_articles:
             repo.mark_articles_emailed([a.guid for a in digest_articles])
 
+        # 5. Produce podcast episode -------------------------------------------
+        logger.info("[5/5] Producing podcast episode...")
+        pod = produce_episode(repo=repo)
+        result["podcast_skipped"] = pod["skipped"]
+        result["podcast_mp3"] = pod.get("mp3_path")
+        if pod["skipped"]:
+            logger.info("      Skipped (no new articles or already done)")
+        elif pod["tts_ok"]:
+            logger.info("      MP3 ready: %s", pod["mp3_path"])
+        else:
+            logger.warning("      TTS failed — script saved, will retry next run")
+
         result["success"] = True
 
     except Exception as exc:
@@ -142,6 +158,10 @@ def run_pipeline(hours: int = DEFAULT_LOOKBACK_HOURS) -> dict:
         "  Emailed:    %d (sent: %s)",
         result["emailed"],
         result["email_success"],
+    )
+    logger.info(
+        "  Podcast:    %s",
+        result["podcast_mp3"] or ("skipped" if result["podcast_skipped"] else "TTS failed — retry next run"),
     )
     logger.info("=" * 60)
 
