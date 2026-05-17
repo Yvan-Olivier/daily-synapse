@@ -1,11 +1,10 @@
-"""Daily Synapse — M0 entry point.
+"""Daily Synapse — M3 entry point.
 
-Run the daily pipeline: scrape Anthropic RSS feeds, store in Postgres,
-summarize each article via Ollama.
+Run the daily pipeline: scrape → summarize → critic → curate → email + podcast.
 
 Usage:
-    python main.py            # Use default lookback (48h)
-    python main.py 24         # Custom lookback in hours
+    python main.py            # default lookback (48h)
+    python main.py 168        # custom lookback in hours
 """
 import sys
 
@@ -13,11 +12,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from app.services.process_summaries import run_pipeline
+from app.graph.pipeline import run_graph
 
 
 def main(hours: int = 48) -> dict:
-    return run_pipeline(hours=hours)
+    return run_graph(hours=hours)
 
 
 if __name__ == "__main__":
