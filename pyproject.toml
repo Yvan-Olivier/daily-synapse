@@ -7,6 +7,8 @@ requires-python = ">=3.12"
 dependencies = [
     "feedparser>=6.0.12",
     "jinja2>=3.1.0",
+    "langgraph>=1.2.0",
+    "langsmith>=0.8.5",
     "ollama>=0.4.0",
     "openai>=2.37.0",
     "psycopg2-binary>=2.9.9",
