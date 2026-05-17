@@ -74,18 +74,6 @@ class Repository:
         self.session.commit()
         return True
 
-    def get_articles_for_digest(self) -> List[AnthropicArticle]:
-        """Return summarized articles not yet included in a digest."""
-        return (
-            self.session.query(AnthropicArticle)
-            .filter(
-                AnthropicArticle.summary.isnot(None),
-                AnthropicArticle.emailed_at.is_(None),
-            )
-            .order_by(AnthropicArticle.published_at.desc())
-            .all()
-        )
-
     def mark_articles_emailed(self, guids: List[str]) -> None:
         """Stamp emailed_at on all articles included in the sent digest."""
         now = datetime.now(timezone.utc)
@@ -96,18 +84,6 @@ class Repository:
         self.session.commit()
 
     # --- Podcast episodes ----------------------------------------------------
-
-    def get_articles_for_podcast(self) -> List[AnthropicArticle]:
-        """Return summarized articles not yet included in a podcast episode."""
-        return (
-            self.session.query(AnthropicArticle)
-            .filter(
-                AnthropicArticle.summary.isnot(None),
-                AnthropicArticle.podcasted_at.is_(None),
-            )
-            .order_by(AnthropicArticle.published_at.desc())
-            .all()
-        )
 
     def mark_articles_podcasted(self, guids: List[str]) -> None:
         """Stamp podcasted_at on all articles included in the episode."""

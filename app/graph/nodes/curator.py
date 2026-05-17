@@ -2,12 +2,14 @@
 import logging
 from typing import List
 
+from openai import OpenAI
 from pydantic import BaseModel
 
 from app.graph.state import PipelineState
-from app.llm.base import OllamaBase
 
 logger = logging.getLogger(__name__)
+
+MODEL = "gpt-4o-mini"
 
 USER_PROFILE = (
     "Senior AI engineer interested in AI safety, LLM research, and applied AI systems."
@@ -30,7 +32,10 @@ class CuratorOutput(BaseModel):
     scores: List[ArticleScore]
 
 
-class CuratorAgent(OllamaBase):
+class CuratorAgent:
+    def __init__(self):
+        self.client = OpenAI()
+
     def rank(self, articles: list) -> list:
         if not articles:
             return articles
@@ -42,17 +47,16 @@ class CuratorAgent(OllamaBase):
         user_prompt = f"Rate these articles:\n\n{articles_block}"
 
         try:
-            response = self.client.chat(
-                model=self.model,
+            response = self.client.beta.chat.completions.parse(
+                model=MODEL,
+                max_tokens=1024,
                 messages=[
                     {"role": "system", "content": CURATOR_SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},
                 ],
-                format=CuratorOutput.model_json_schema(),
-                options={"temperature": 0.2},
-                think=False,
+                response_format=CuratorOutput,
             )
-            output = CuratorOutput.model_validate_json(response.message.content)
+            output = response.choices[0].message.parsed
             score_map = {s.guid: s.score for s in output.scores}
             ranked = sorted(articles, key=lambda a: score_map.get(a.guid, 0), reverse=True)
             logger.info(

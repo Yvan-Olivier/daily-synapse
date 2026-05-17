@@ -1,11 +1,4 @@
-"""Ollama LLM client — local, zero-cost inference for M0.
-
-Uses Ollama's structured-output support (`format=` parameter) with a
-Pydantic JSON schema to guarantee parseable responses.
-
-In later milestones, this client will be replaced (or coexist) with
-Claude Haiku / Sonnet through a common interface.
-"""
+"""Ollama LLM client — local inference for summarization."""
 import logging
 from typing import Optional
 
@@ -35,11 +28,6 @@ Output strictly valid JSON matching the requested schema."""
 class OllamaClient(OllamaBase):
 
     def summarize(self, title: str, content: str) -> Optional[SummaryOutput]:
-        """Generate a structured summary for one article.
-
-        Returns None if the LLM call fails or the response can't be parsed.
-        """
-        # Truncate to a reasonable context size for a 7B model
         snippet = (content or title)[:6000]
         user_prompt = (
             f"Article title: {title}\n\n"

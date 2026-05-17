@@ -67,7 +67,7 @@ _Note : le détail des sources, canaux et agents sera fixé au Bloc 2._
 - [x] **Bloc 6** — DevOps & production (verrouillé)
 - [x] **Bloc 7** — Différenciation & CV (verrouillé)
 - [x] **Phase 3 — Roadmap** (verrouillée)
-- [x] Phase 3 — Implémentation M0 ✅ M1 ✅ M2 ✅ (M3 à venir)
+- [x] Phase 3 — Implémentation M0 ✅ M1 ✅ M2 ✅ M3 ✅
 
 ---
 
@@ -113,9 +113,9 @@ Logique :
 
 | Niveau | Modèle | Usage | Coût |
 |---|---|---|---|
-| **Local** | Ollama (Mistral / Llama 3) | Pré-filtrage des articles | $0 |
-| **Cheap** | Claude Haiku (Anthropic) | Résumés des articles (volume) | ~$0.25/1M tokens |
-| **Quality** | Claude Sonnet (Anthropic) | Curation / ranking / script podcast | ~$3/1M tokens |
+| **Local** | Ollama qwen3.5:9b | Résumés + script podcast | $0 |
+| **Cloud économique** | OpenAI gpt-4o-mini | Critic (fact-checking) + Curator (ranking) | ~$0.15/1M tokens input |
+| **Cloud qualité** | OpenAI gpt-4o (futur) | Upgrade si qualité insuffisante | ~$2.50/1M tokens input |
 
 ### Services & outils
 
@@ -148,11 +148,11 @@ Scrape → Summarize → Critic → Curate
 | Agent | Modèle | Rôle |
 |---|---|---|
 | Scraper | — | Collecte depuis les sources RSS/API |
-| Summarizer | Claude Haiku | Résumé de chaque article |
-| Critic | Claude Haiku | Vérifie le résumé contre la source, rejette si hallucination |
-| Curator | Claude Sonnet | Classe les articles par pertinence selon le profil user |
-| EmailProducer | Claude Haiku | Génère le mail HTML structuré |
-| PodcastProducer | Claude Sonnet | Écrit le script podcast → Azure AI Speech → MP3 |
+| Summarizer | Ollama qwen3.5:9b | Résumé de chaque article |
+| Critic | OpenAI gpt-4o-mini | Vérifie le résumé contre la source, rejette si hallucination |
+| Curator | OpenAI gpt-4o-mini | Classe les articles par pertinence selon le profil user |
+| EmailProducer | — | Envoie le digest HTML structuré via Resend |
+| PodcastProducer | Ollama qwen3.5:9b + OpenAI TTS | Écrit le script podcast → TTS → MP3 |
 
 ### Anti-hallucination
 
@@ -255,7 +255,7 @@ Certains composants seront introduits progressivement pour éviter de tout confi
 | Composant | M0-M2 | M3+ |
 |---|---|---|
 | Orchestration agents | Fonctions Python séquentielles | LangGraph (M3) |
-| LLM provider | À valider (OpenAI ou Anthropic direct) | Multi-tier Ollama + Claude (M3+) |
+| LLM provider | Ollama local | Ollama (résumés) + OpenAI gpt-4o-mini (critic/curator) |
 | Vector DB | Aucune (pas besoin) | Qdrant (M4) |
 | API | Aucune | FastAPI (M6) |
 | Dashboard | Aucun | Streamlit (M7) |
@@ -349,7 +349,7 @@ Une seconde exécution successive doit afficher `0 new` (idempotence).
 **Prérequis** : Docker Desktop, Ollama (`ollama pull qwen3.5:9b`), uv.
 
 ```bash
-cp .env.example .env          # renseigner RESEND_API_KEY + DIGEST_EMAIL
+cp .env.example .env          # renseigner RESEND_API_KEY, DIGEST_EMAIL, OPENAI_API_KEY
 uv sync                       # installer les dépendances
 docker compose up -d          # démarrer Postgres
 uv run python -m app.database.create_tables  # créer les tables (1 fois)
@@ -455,6 +455,105 @@ output/
 
 ---
 
+## 🤖 Spécification M3 — LangGraph + Agent Critic
+
+### Ce que M3 change
+
+`app/services/process_summaries.py` est **supprimé** et remplacé par un graphe LangGraph dans `app/graph/`. Tous les modules métier existants (scrapers, email, podcast, llm) sont réutilisés — seule l'orchestration change.
+
+### Graphe
+
+```
+Scraper → Summarizer → Critic → Curator → EmailProducer → PodcastProducer
+                          ↓
+                       (rejet) → discard
+```
+
+Exécution séquentielle. Le fan-out Email + Podcast est séquentiel (pas parallèle) en M3.
+
+### Agents
+
+| Agent | LLM | Rôle |
+|---|---|---|
+| Scraper | — | Scrape les flux RSS, insère en DB, retourne les nouveaux articles |
+| Summarizer | Ollama qwen3.5:9b | Résume chaque article (titre + 2-3 phrases) |
+| Critic | OpenAI gpt-4o-mini | Valide chaque résumé contre la source — APPROVED ou REJECTED |
+| Curator | OpenAI gpt-4o-mini | Classe les articles par pertinence (profil hardcodé en M3) |
+| EmailProducer | — | Envoie le digest HTML via Resend depuis les articles du State |
+| PodcastProducer | Ollama qwen3.5:9b + OpenAI TTS | Génère le script → TTS → MP3 depuis les articles du State |
+
+> Ollama pour les tâches de génération de texte libre (résumés, script). OpenAI gpt-4o-mini pour les tâches à output structuré (Critic, Curator) qui nécessitent un JSON fiable. Voir ADR 0001.
+
+### Critic — comportement détaillé
+
+- Reçoit : article source (titre + contenu) + résumé produit
+- Prompt : "Is this summary faithful to the source? Reply APPROVED or REJECTED + reason."
+- Output structuré : `{ approved: bool, reason: str }`
+- Si rejeté : article marqué `rejected` dans le State, jamais inclus dans le Digest ou l'Episode
+- Pas de retry — discard définitif, raison loggée dans LangSmith
+
+### Curator — profil utilisateur
+
+Profil hardcodé dans le prompt en M3 :
+> "Senior AI engineer interested in AI safety, LLM research, and applied AI systems."
+
+Remplacé par une lecture en DB (`users` table) en M6.
+
+### PipelineState
+
+```python
+class PipelineState(TypedDict):
+    hours: int                          # lookback window
+    articles: list[AnthropicArticle]    # articles validés par le Critic, triés par le Curator
+    rejected: list[str]                 # guids rejetés
+    email_sent: bool
+    podcast_mp3: str | None
+    errors: list[str]
+```
+
+### Repository
+
+Une seule instance `Repository` créée dans `pipeline.py`, passée via closure aux nœuds qui en ont besoin. Une seule connexion DB par run.
+
+### LangSmith
+
+Activé dès M3 via deux variables `.env` — zero code supplémentaire.
+
+```
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=
+```
+
+### Structure de fichiers
+
+```
+app/
+└── graph/
+    ├── __init__.py
+    ├── state.py              ← PipelineState TypedDict
+    ├── pipeline.py           ← StateGraph + compilation + run_graph()
+    └── nodes/
+        ├── __init__.py
+        ├── scraper.py
+        ├── summarizer.py
+        ├── critic.py
+        ├── curator.py
+        ├── email_producer.py
+        └── podcast_producer.py
+```
+
+### Fichiers supprimés
+
+- `app/services/process_summaries.py` — remplacé par `app/graph/pipeline.py`
+
+### Fichiers refactorisés
+
+- `app/podcast/producer.py` — logique d'orchestration migre dans `nodes/podcast_producer.py`
+- `app/llm/script_writer.py` — reste un module indépendant, appelé par `nodes/podcast_producer.py`
+- `main.py` — appelle `run_graph()` au lieu de `run_pipeline()`
+
+---
+
 ## 🔮 Idées en réserve (post-MVP, non engagées)
 
 - Research Agent conversationnel (extension future explicitement gardée pour plus tard)
@@ -467,4 +566,4 @@ output/
 
 ---
 
-_Dernière mise à jour : M0 + M1 + M2 validés. Prochaine étape : M3 (LangGraph + agent Critic)._
+_Dernière mise à jour : M0 ✅ M1 ✅ M2 ✅ M3 ✅. Prochaine étape : M4 (Embeddings + Qdrant)._

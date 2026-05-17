@@ -1,9 +1,4 @@
-"""Central configuration for Daily Synapse.
-
-In M0 only RSS feed URLs and pipeline defaults live here.
-Later milestones will move this to a DB-backed source registry
-to satisfy the domain-agnostic design principle.
-"""
+"""Central configuration for Daily Synapse."""
 
 # Anthropic — 3 community-maintained RSS feeds
 ANTHROPIC_RSS_FEEDS = [

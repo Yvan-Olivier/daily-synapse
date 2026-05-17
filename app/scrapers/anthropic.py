@@ -14,11 +14,7 @@ from app.config import ANTHROPIC_RSS_FEEDS
 
 
 class AnthropicArticle(BaseModel):
-    """Scraper-side article model (Pydantic).
-
-    Decoupled from the SQLAlchemy ORM model so scrapers can run
-    independently and be tested in isolation.
-    """
+    """Scraper-side Pydantic model, decoupled from the SQLAlchemy ORM."""
     title: str
     description: Optional[str] = None
     url: str

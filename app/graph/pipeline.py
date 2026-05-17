@@ -1,9 +1,7 @@
-"""LangGraph pipeline — M3 entry point.
+"""LangGraph pipeline — wires all nodes into the daily processing graph.
 
 Graph:
     Scraper → Summarizer → Critic → Curator → EmailProducer → PodcastProducer
-                               ↓
-                           (rejected) → discarded (logged only)
 """
 import logging
 from datetime import datetime
@@ -54,7 +52,7 @@ def run_graph(hours: int = DEFAULT_LOOKBACK_HOURS) -> dict:
     """Run the full M3 pipeline. Returns final PipelineState + success flag."""
     start = datetime.now()
     logger.info("=" * 60)
-    logger.info("Daily Synapse — pipeline starting (M3 LangGraph)")
+    logger.info("Daily Synapse — pipeline starting")
     logger.info("=" * 60)
 
     repo = Repository()
@@ -86,3 +84,11 @@ def run_graph(hours: int = DEFAULT_LOOKBACK_HOURS) -> dict:
         return {"success": False, "error": str(exc)}
     finally:
         repo.close()
+
+
+if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv()
+    repo = Repository()
+    print(build_graph(repo).get_graph().draw_mermaid())
+    repo.close()

@@ -1,6 +1,4 @@
-"""Daily Synapse — M3 entry point.
-
-Run the daily pipeline: scrape → summarize → critic → curate → email + podcast.
+"""Daily Synapse pipeline entry point.
 
 Usage:
     python main.py            # default lookback (48h)

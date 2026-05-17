@@ -1,8 +1,4 @@
-"""TTS client abstraction — swappable between providers.
-
-M2: OpenAITTSClient (Azure for Students blocks Speech Services regions)
-M8: AzureTTSClient to be added here when deploying to Azure
-"""
+"""TTS client abstraction — swappable between providers."""
 import logging
 import os
 from abc import ABC, abstractmethod
@@ -23,7 +19,7 @@ class OpenAITTSClient(TTSClient):
     def __init__(self, voice: str | None = None, model: str = "tts-1"):
         self.voice = voice or os.getenv("PODCAST_VOICE", "nova")
         self.model = model
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.client = OpenAI()
 
     def synthesize(self, script: str, output_path: Path) -> bool:
         try:
