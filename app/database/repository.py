@@ -16,7 +16,7 @@ class Repository:
     def __init__(self, session: Optional[Session] = None):
         self.session = session or get_session()
 
-    # --- Anthropic articles --------------------------------------------------
+    # --- Articles ------------------------------------------------------------
 
     def bulk_insert_anthropic_articles(self, articles: List[dict]) -> int:
         """Insert articles, skipping any whose guid already exists.

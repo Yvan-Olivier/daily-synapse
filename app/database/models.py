@@ -1,9 +1,4 @@
-"""SQLAlchemy ORM models — M0 → M2.
-
-For M0 we only model Anthropic articles. Adding more sources in later
-milestones will add new tables (one per source for now; refactored into
-a single generic `articles` table once the source registry is introduced).
-"""
+"""SQLAlchemy ORM models."""
 from datetime import date, datetime, timezone
 from typing import List, Optional
 
@@ -25,7 +20,7 @@ class AnthropicArticle(Base):
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     category: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
-    # Populated by the Ollama summarizer
+    # Populated by the Summarizer node
     summary_title: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     summarized_at: Mapped[Optional[datetime]] = mapped_column(

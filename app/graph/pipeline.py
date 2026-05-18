@@ -49,7 +49,7 @@ def build_graph(repo: Repository):
 
 
 def run_graph(hours: int = DEFAULT_LOOKBACK_HOURS) -> dict:
-    """Run the full M3 pipeline. Returns final PipelineState + success flag."""
+    """Run the full pipeline. Returns final PipelineState + success flag."""
     start = datetime.now()
     logger.info("=" * 60)
     logger.info("Daily Synapse — pipeline starting")
