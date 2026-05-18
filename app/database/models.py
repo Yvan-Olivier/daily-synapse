@@ -26,6 +26,13 @@ class AnthropicArticle(Base):
     summarized_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Populated by the Critic node
+    criticized_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    critic_approved: Mapped[Optional[bool]] = mapped_column(
+        nullable=True
+    )
     emailed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

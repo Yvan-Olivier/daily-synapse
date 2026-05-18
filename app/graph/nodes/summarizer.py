@@ -52,16 +52,25 @@ class SummarizerAgent(OllamaBase):
 def summarizer_node(state: PipelineState, repo: Repository) -> dict:
     agent = SummarizerAgent()
     articles = state["articles"]
-    summarized = []
+    kept = []
+    new_summaries = 0
     errors = []
 
     for article in articles:
+        # Already summarised in a previous run — pass through untouched
+        if article.summary is not None:
+            kept.append(article)
+            continue
+
         content = article.description or article.title
         result = agent.summarize(title=article.title, content=content)
 
         if result is None:
             errors.append(f"Summarizer failed for {article.guid}")
-            logger.warning("Summarizer: FAILED for '%s'", article.title[:60])
+            logger.warning(
+                "Summarizer: FAILED for '%s' — will retry next run",
+                article.title[:60],
+            )
             continue
 
         repo.update_summary(
@@ -71,8 +80,12 @@ def summarizer_node(state: PipelineState, repo: Repository) -> dict:
         )
         article.summary_title = result.title
         article.summary = result.summary
-        summarized.append(article)
+        kept.append(article)
+        new_summaries += 1
         logger.info("Summarizer: -> %s", result.title)
 
-    logger.info("Summarizer: %d/%d succeeded", len(summarized), len(articles))
-    return {"articles": summarized, "errors": errors}
+    logger.info(
+        "Summarizer: %d new summaries, %d total kept",
+        new_summaries, len(kept),
+    )
+    return {"articles": kept, "errors": errors}

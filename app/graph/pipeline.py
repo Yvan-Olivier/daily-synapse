@@ -1,7 +1,11 @@
 """LangGraph pipeline — wires all nodes into the daily processing graph.
 
 Graph:
-    Scraper → Summarizer → Critic → Curator → EmailProducer → PodcastProducer
+    Scraper -> Resumer -> Summarizer -> Critic -> Curator -> EmailProducer -> PodcastProducer
+
+Scraper inserts fresh RSS articles. Resumer is the single DB-read entry
+point: it loads every Article still pending some downstream stage and
+puts them in state["articles"]. Downstream Agents read only from state.
 """
 import logging
 from datetime import datetime
@@ -14,6 +18,7 @@ from app.graph.nodes.critic import critic_node
 from app.graph.nodes.curator import curator_node
 from app.graph.nodes.email_producer import email_producer_node
 from app.graph.nodes.podcast_producer import podcast_producer_node
+from app.graph.nodes.resumer import resumer_node
 from app.graph.nodes.scraper import scraper_node
 from app.graph.nodes.summarizer import summarizer_node
 from app.graph.state import PipelineState
@@ -31,6 +36,7 @@ def build_graph(repo: Repository):
     graph = StateGraph(PipelineState)
 
     graph.add_node("scraper", lambda s: scraper_node(s, repo))
+    graph.add_node("resumer", lambda s: resumer_node(s, repo))
     graph.add_node("summarizer", lambda s: summarizer_node(s, repo))
     graph.add_node("critic", lambda s: critic_node(s, repo))
     graph.add_node("curator", curator_node)
@@ -38,7 +44,8 @@ def build_graph(repo: Repository):
     graph.add_node("podcast_producer", lambda s: podcast_producer_node(s, repo))
 
     graph.set_entry_point("scraper")
-    graph.add_edge("scraper", "summarizer")
+    graph.add_edge("scraper", "resumer")
+    graph.add_edge("resumer", "summarizer")
     graph.add_edge("summarizer", "critic")
     graph.add_edge("critic", "curator")
     graph.add_edge("curator", "email_producer")
@@ -61,7 +68,7 @@ def run_graph(hours: int = DEFAULT_LOOKBACK_HOURS) -> dict:
         initial_state: PipelineState = {
             "hours": hours,
             "articles": [],
-            "rejected": [],
+            "rejected_count_this_run": 0,
             "email_sent": False,
             "podcast_mp3": None,
             "errors": [],
@@ -71,7 +78,11 @@ def run_graph(hours: int = DEFAULT_LOOKBACK_HOURS) -> dict:
 
         logger.info("=" * 60)
         logger.info("Pipeline finished in %.1fs", duration)
-        logger.info("  Articles:  %d approved, %d rejected", len(final_state["articles"]), len(final_state["rejected"]))
+        logger.info(
+            "  Articles:  %d flowing through, %d newly rejected this run",
+            len(final_state["articles"]),
+            final_state["rejected_count_this_run"],
+        )
         logger.info("  Email:     %s", "sent" if final_state["email_sent"] else "failed")
         logger.info("  Podcast:   %s", final_state["podcast_mp3"] or "skipped/failed")
         if final_state["errors"]:

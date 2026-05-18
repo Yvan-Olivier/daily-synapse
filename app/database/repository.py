@@ -74,6 +74,46 @@ class Repository:
         self.session.commit()
         return True
 
+    def get_articles_pending_critic(self) -> List[AnthropicArticle]:
+        """Articles summarised but not yet evaluated by the Critic."""
+        return (
+            self.session.query(AnthropicArticle)
+            .filter(AnthropicArticle.summary.is_not(None))
+            .filter(AnthropicArticle.criticized_at.is_(None))
+            .all()
+        )
+
+    def get_articles_pending_email(self) -> List[AnthropicArticle]:
+        """Approved articles not yet included in a successful Digest."""
+        return (
+            self.session.query(AnthropicArticle)
+            .filter(AnthropicArticle.critic_approved.is_(True))
+            .filter(AnthropicArticle.emailed_at.is_(None))
+            .all()
+        )
+
+    def get_articles_pending_podcast(self) -> List[AnthropicArticle]:
+        """Approved articles not yet included in a successful Episode."""
+        return (
+            self.session.query(AnthropicArticle)
+            .filter(AnthropicArticle.critic_approved.is_(True))
+            .filter(AnthropicArticle.podcasted_at.is_(None))
+            .all()
+        )
+
+    def set_critic_verdict(self, guid: str, approved: bool) -> bool:
+        """Stamp criticized_at + critic_approved. Called only on a real verdict
+        (never on API failure — those leave both columns NULL for retry)."""
+        article = (
+            self.session.query(AnthropicArticle).filter_by(guid=guid).first()
+        )
+        if not article:
+            return False
+        article.criticized_at = datetime.now(timezone.utc)
+        article.critic_approved = approved
+        self.session.commit()
+        return True
+
     def mark_articles_emailed(self, guids: List[str]) -> None:
         """Stamp emailed_at on all articles included in the sent digest."""
         now = datetime.now(timezone.utc)

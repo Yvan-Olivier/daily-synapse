@@ -1,4 +1,9 @@
-"""Critic node — validates each summary against its source article."""
+"""Critic node — validates each summary against its source article.
+
+Persists the verdict in DB (`criticized_at` + `critic_approved`). An API
+failure leaves both columns NULL so the Resumer retries the Article on
+the next run — API failure is NOT a rejection.
+"""
 import logging
 from typing import Optional
 
@@ -57,11 +62,20 @@ class CriticAgent:
 def critic_node(state: PipelineState, repo: Repository) -> dict:
     agent = CriticAgent()
     articles = state["articles"]
-    approved = []
-    rejected = list(state["rejected"])
+    kept = []  # articles flowing downstream (newly approved + previously approved)
+    new_rejections = 0
+    api_failures = 0
     errors = []
 
     for article in articles:
+        # Already evaluated in a previous run — skip the API call.
+        # Previously-approved articles flow downstream; previously-rejected
+        # would not be in state (the Resumer filters them out), but guard anyway.
+        if article.criticized_at is not None:
+            if article.critic_approved:
+                kept.append(article)
+            continue
+
         content = article.description or article.title
         verdict = agent.verify(
             title=article.title,
@@ -70,19 +84,32 @@ def critic_node(state: PipelineState, repo: Repository) -> dict:
         )
 
         if verdict is None:
+            # API failure — do NOT persist anything. The Resumer will retry next run.
             errors.append(f"Critic call failed for {article.guid}")
-            logger.warning("Critic: call FAILED for '%s' — discarding", article.title[:60])
-            rejected.append(article.guid)
+            api_failures += 1
+            logger.warning(
+                "Critic: API FAILURE for '%s' — will retry next run",
+                article.title[:60],
+            )
             continue
 
+        repo.set_critic_verdict(article.guid, verdict.approved)
         if verdict.approved:
-            approved.append(article)
+            kept.append(article)
             logger.info("Critic: APPROVED '%s'", article.title[:60])
         else:
-            rejected.append(article.guid)
+            new_rejections += 1
             logger.warning(
-                "Critic: REJECTED '%s' — %s", article.title[:60], verdict.reason
+                "Critic: REJECTED '%s' — %s",
+                article.title[:60], verdict.reason,
             )
 
-    logger.info("Critic: %d approved, %d rejected", len(approved), len(rejected))
-    return {"articles": approved, "rejected": rejected, "errors": errors}
+    logger.info(
+        "Critic: %d kept, %d newly rejected, %d API failures (will retry)",
+        len(kept), new_rejections, api_failures,
+    )
+    return {
+        "articles": kept,
+        "rejected_count_this_run": new_rejections,
+        "errors": errors,
+    }

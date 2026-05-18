@@ -1,4 +1,8 @@
-"""Scraper node — fetches RSS articles and persists new ones to DB."""
+"""Scraper node — fetches RSS articles and persists new ones to DB.
+
+Single responsibility: ingest fresh content. DB rehydration of in-flight
+work from previous runs is the Resumer's job.
+"""
 import logging
 
 from app.database.repository import Repository
@@ -14,9 +18,8 @@ def scraper_node(state: PipelineState, repo: Repository) -> dict:
     article_dicts = [a.model_dump() for a in articles]
     inserted = repo.bulk_insert_anthropic_articles(article_dicts)
 
-    pending = repo.get_articles_without_summary()
     logger.info(
-        "Scraper: %d in feeds, %d inserted, %d pending summary",
-        len(articles), inserted, len(pending),
+        "Scraper: %d in feeds, %d inserted (new)",
+        len(articles), inserted,
     )
-    return {"articles": pending}
+    return {}

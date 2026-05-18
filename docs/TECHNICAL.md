@@ -95,15 +95,16 @@ _Note : le détail des sources, canaux et agents sera fixé au Bloc 2._
 **Pipeline principal + fan-out parallèle pour les Producers (LangGraph)**
 
 ```
-Scrape → Summarize → Critic → Curate
-                                  ↓
-                    ┌─────────────┴─────────────┐
-                EmailProducer          PodcastProducer
+Scrape → Resume → Summarize → Critic → Curate
+                                          ↓
+                            ┌─────────────┴─────────────┐
+                        EmailProducer          PodcastProducer
 ```
 
 Logique :
-- Phase séquentielle : collecte → enrichissement → résumé → contrôle qualité → curation personnalisée
+- Phase séquentielle : collecte → reprise des articles en attente → enrichissement → résumé → contrôle qualité → curation personnalisée
 - Phase parallèle : chaque Producer génère son format en simultané (email et podcast)
+- Le Resumer rehydrate depuis la DB les articles en cours de pipeline (sans résumé, sans verdict, approuvés non-livrés) pour garantir qu'aucun article n'est silencieusement perdu si une étape avait échoué au run précédent.
 
 ---
 
@@ -139,20 +140,21 @@ Logique :
 ### Graphe d'agents LangGraph (mis à jour)
 
 ```
-Scrape → Summarize → Critic → Curate
-                                  ↓
-                    ┌─────────────┴─────────────┐
-             EmailProducer          PodcastProducer
+Scrape → Resume → Summarize → Critic → Curate
+                                          ↓
+                            ┌─────────────┴─────────────┐
+                     EmailProducer          PodcastProducer
 ```
 
 | Agent | Modèle | Rôle |
 |---|---|---|
-| Scraper | — | Collecte depuis les sources RSS/API |
-| Summarizer | Ollama qwen3.5:9b | Résumé de chaque article |
-| Critic | OpenAI gpt-4o-mini | Vérifie le résumé contre la source, rejette si hallucination |
+| Scraper | — | Fetch RSS, insert nouveaux articles en DB (uniquement) |
+| Resumer | — | Rehydrate depuis la DB les articles en attente (sans résumé, sans verdict, approuvés non-livrés). Unique point de lecture DB en aval. |
+| Summarizer | Ollama qwen3.5:9b | Résumé de chaque article (skip si déjà résumé) |
+| Critic | OpenAI gpt-4o-mini | Vérifie le résumé contre la source, rejette si hallucination (verdict persisté en DB ; API failure ≠ rejet) |
 | Curator | OpenAI gpt-4o-mini | Classe les articles par pertinence selon le profil user |
-| EmailProducer | — | Envoie le digest HTML structuré via Resend |
-| PodcastProducer | Ollama qwen3.5:9b + OpenAI TTS | Écrit le script podcast → TTS → MP3 |
+| EmailProducer | — | Envoie le digest HTML structuré via Resend ; ne renvoie pas un article déjà emailé |
+| PodcastProducer | Ollama qwen3.5:9b + OpenAI TTS | Écrit le script podcast → TTS → MP3 ; ne re-podcaste pas un article déjà inclus |
 
 ### Anti-hallucination
 
@@ -464,9 +466,11 @@ output/
 ### Graphe
 
 ```
-Scraper → Summarizer → Critic → Curator → EmailProducer → PodcastProducer
-                          ↓
-                       (rejet) → discard
+Scraper → Resumer → Summarizer → Critic → Curator → EmailProducer → PodcastProducer
+                                    ↓
+                            (rejet persisté) → discard
+                                    ↓
+                            (API failure) → retry next run
 ```
 
 Exécution séquentielle. Le fan-out Email + Podcast est séquentiel (pas parallèle) en M3.
@@ -475,12 +479,13 @@ Exécution séquentielle. Le fan-out Email + Podcast est séquentiel (pas parall
 
 | Agent | LLM | Rôle |
 |---|---|---|
-| Scraper | — | Scrape les flux RSS, insère en DB, retourne les nouveaux articles |
-| Summarizer | Ollama qwen3.5:9b | Résume chaque article (titre + 2-3 phrases) |
-| Critic | OpenAI gpt-4o-mini | Valide chaque résumé contre la source — APPROVED ou REJECTED |
-| Curator | OpenAI gpt-4o-mini | Classe les articles par pertinence (profil hardcodé en M3) |
-| EmailProducer | — | Envoie le digest HTML via Resend depuis les articles du State |
-| PodcastProducer | Ollama qwen3.5:9b + OpenAI TTS | Génère le script → TTS → MP3 depuis les articles du State |
+| Scraper | — | Fetch les flux RSS et insère les nouveaux articles en DB. N'écrit rien dans `state["articles"]`. |
+| Resumer | — | Unique point de lecture DB du graphe. Charge tous les articles en attente (sans résumé, sans verdict, approuvés non-emailés, approuvés non-podcastés), dédup par guid, et peuple `state["articles"]`. |
+| Summarizer | Ollama qwen3.5:9b | Résume chaque article. Skip si `summary IS NOT NULL`. |
+| Critic | OpenAI gpt-4o-mini | Valide chaque résumé contre la source. Skip si `criticized_at IS NOT NULL`. Persiste le verdict en DB (`criticized_at` + `critic_approved`). |
+| Curator | OpenAI gpt-4o-mini | Classe les articles par pertinence (profil hardcodé en M3). Re-rank uniforme : articles fraîchement approuvés et zombies ressuscités sont mélangés. |
+| EmailProducer | — | Envoie le digest HTML via Resend. Ne renvoie que `critic_approved AND emailed_at IS NULL`. Sur succès stamp `emailed_at`. Sur échec aucun stamp → retry au prochain run. |
+| PodcastProducer | Ollama qwen3.5:9b + OpenAI TTS | Génère le script → TTS → MP3. Ne podcaste que `critic_approved AND podcasted_at IS NULL`. Sur échec TTS, le script reste en DB pour retry TTS-only. |
 
 > Ollama pour les tâches de génération de texte libre (résumés, script). OpenAI gpt-4o-mini pour les tâches à output structuré (Critic, Curator) qui nécessitent un JSON fiable. Voir ADR 0001.
 
@@ -489,8 +494,9 @@ Exécution séquentielle. Le fan-out Email + Podcast est séquentiel (pas parall
 - Reçoit : article source (titre + contenu) + résumé produit
 - Prompt : "Is this summary faithful to the source? Reply APPROVED or REJECTED + reason."
 - Output structuré : `{ approved: bool, reason: str }`
-- Si rejeté : article marqué `rejected` dans le State, jamais inclus dans le Digest ou l'Episode
-- Pas de retry — discard définitif, raison loggée dans LangSmith
+- **Verdict APPROVED** → `set_critic_verdict(guid, True)` : `criticized_at` + `critic_approved=TRUE` stampés. L'article continue vers le Curator.
+- **Verdict REJECTED** → `set_critic_verdict(guid, False)` : `critic_approved=FALSE` stampé. L'article est exclu de tous les Producers à jamais (le Resumer filtre `critic_approved IS TRUE` pour les buckets de livraison). `reason` loggée mais non persistée.
+- **API failure** (réponse vide ou exception) → **aucune écriture en DB**. `criticized_at` reste NULL. Le Resumer re-tirera l'article au prochain run pour re-tenter. Cf. ADR 0002 et la mise à jour de l'ADR 0001 (`api_failure ≠ rejection`).
 
 ### Curator — profil utilisateur
 
@@ -503,13 +509,17 @@ Remplacé par une lecture en DB (`users` table) en M6.
 
 ```python
 class PipelineState(TypedDict):
-    hours: int                          # lookback window
-    articles: list[AnthropicArticle]    # articles validés par le Critic, triés par le Curator
-    rejected: list[str]                 # guids rejetés
+    hours: int                              # lookback window for the scraper
+    articles: list                          # AnthropicArticle ORM objects — evolves through nodes
+    rejected_count_this_run: int            # tally of new rejections produced by the Critic this run
     email_sent: bool
     podcast_mp3: str | None
-    errors: list[str]
+    errors: Annotated[list, operator.add]   # accumulates across nodes
 ```
+
+`articles` est peuplé par le Resumer en tête de pipeline et raffiné par chaque nœud (skip ou drop). Tous les nœuds en aval du Resumer lisent uniquement depuis le State — la rehydratation DB est centralisée.
+
+Le compteur `rejected_count_this_run` remplace la liste `rejected: list[str]` historique : la rejection est maintenant persistée en DB (`critic_approved = FALSE`), donc le State n'a plus besoin de la transporter — il garde juste un tally pour le log de fin de run.
 
 ### Repository
 
@@ -535,6 +545,7 @@ app/
     └── nodes/
         ├── __init__.py
         ├── scraper.py
+        ├── resumer.py        ← seul point de lecture DB du graphe
         ├── summarizer.py
         ├── critic.py
         ├── curator.py
@@ -566,4 +577,4 @@ app/
 
 ---
 
-_Dernière mise à jour : M0 ✅ M1 ✅ M2 ✅ M3 ✅. Prochaine étape : M4 (Embeddings + Qdrant)._
+_Dernière mise à jour : M0 ✅ M1 ✅ M2 ✅ M3 ✅ (patché 2026-05-18 — retry/recovery, ADR 0002). Prochaine étape : M4 (Embeddings + Qdrant)._
